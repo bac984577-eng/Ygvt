@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>السبورة العائمة للكتابة العربية بخط واضح</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: rgba(245, 247, 250, 0.95);
+            overflow: hidden;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* شريط الأدوات العلوي العائم */
+        .floating-toolbar {
+            position: absolute;
+            top: 15px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #ffffff;
+            padding: 10px 20px;
+            border-radius: 30px;
+            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
+            display: flex;
+            gap: 15px;
+            align-items: center;
+            z-index: 1000;
+            border: 1px solid #e1e4e8;
+        }
+
+        .btn {
+            background: #4f46e5;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 20px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: bold;
+            transition: background 0.2s;
+        }
+
+        .btn:hover {
+            background: #4338ca;
+        }
+
+        .btn-secondary {
+            background: #e5e7eb;
+            color: #374151;
+        }
+
+        .btn-secondary:hover {
+            background: #d1d5db;
+        }
+
+        /* منطقة السبورة العائمة */
+        .whiteboard-container {
+            flex: 1;
+            position: relative;
+            margin: 10px;
+            background: #ffffff;
+            border-radius: 16px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+            border: 2px dashed #cbd5e1;
+            overflow: hidden;
+        }
+
+        canvas {
+            display: block;
+            touch-action: none;
+            cursor: crosshair;
+            width: 100%;
+            height: 100%;
+        }
+
+        /* نافذة معاينة النص العربي النظيف الموجه للملاحظات */
+        .preview-panel {
+            position: absolute;
+            bottom: 15px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 90%;
+            max-width: 600px;
+            background: #ffffff;
+            padding: 12px 20px;
+            border-radius: 12px;
+            box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.1);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            z-index: 1000;
+            border: 1px solid #e5e7eb;
+        }
+
+        .preview-text {
+            font-size: 18px;
+            color: #1f2937;
+            font-weight: 500;
+            flex: 1;
+            text-align: right;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            padding-left: 10px;
+        }
+
+        .notification {
+            position: fixed;
+            top: 75px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #10b981;
+            color: white;
+            padding: 6px 16px;
+            border-radius: 20px;
+            font-size: 13px;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+            opacity: 0;
+            transition: opacity 0.3s ease;
+            z-index: 1001;
+            pointer-events: none;
+        }
+
+        .notification.show {
+            opacity: 1;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- شريط الأدوات -->
+    <div class="floating-toolbar">
+        <span style="font-weight: bold; color: #4f46e5; font-size: 15px;">السبورة العربية العائمة</span>
+        <button class="btn btn-secondary" onclick="clearBoard()">مسح السبورة</button>
+        <button class="btn" onclick="simulateRecognition()">تحويل إلى خط واضح</button>
+    </div>
+
+    <div id="notification" class="notification">تم نسخ النص بوضوح! ألصقه في الملاحظات</div>
+
+    <!-- السبورة -->
+    <div class="whiteboard-container">
+        <canvas id="board"></canvas>
+    </div>
+
+    <!-- لوحة المعاينة والإرسال للملاحظات -->
+    <div class="preview-panel">
+        <button class="btn" onclick="copyToNotes()">نسخ إلى الملاحظات</button>
+        <div id="previewText" class="preview-text">اكتب بخط اليد هنا ليظهر النص هنا بخط واضح...</div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('board');
+        const ctx = canvas.getContext('2d');
+        const previewText = document.getElementById('previewText');
+        const notification = document.getElementById('notification');
+
+        let isDrawing = false;
+        let hasDrawn = false;
+
+        function resizeCanvas() {
+            const container = canvas.parentElement;
+            canvas.width = container.clientWidth;
+            canvas.height = container.clientHeight;
+            ctx.lineWidth = 4;
+            ctx.lineCap = 'round';
+            ctx.strokeStyle = '#1e293b';
+        }
+
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        // أحداث الرسم (الفأرة واللمس والشاشات الذكية)
+        canvas.addEventListener('mousedown', startDrawing);
+        canvas.addEventListener('mousemove', draw);
+        canvas.addEventListener('mouseup', stopDrawing);
+        canvas.addEventListener('mouseleave', stopDrawing);
+
+        canvas.addEventListener('touchstart', (e) => startDrawing(e.touches[0]));
+        canvas.addEventListener('touchmove', (e) => draw(e.touches[0]));
+        canvas.addEventListener('touchend', stopDrawing);
+
+        function startDrawing(e) {
+            isDrawing = true;
+            hasDrawn = true;
+            const rect = canvas.getBoundingClientRect();
+            ctx.beginPath();
+            ctx.moveTo(e.clientX - rect.left, e.clientY - rect.top);
+        }
+
+        function draw(e) {
+            if (!isDrawing) return;
+            const rect = canvas.getBoundingClientRect();
+            ctx.lineTo(e.clientX - rect.left, e.clientY - rect.top);
+            ctx.stroke();
+        }
+
+        function stopDrawing() {
+            isDrawing = false;
+        }
+
+        function clearBoard() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            previewText.textContent = "اكتب بخط اليد هنا ليظهر النص هنا بخط واضح...";
+            hasDrawn = false;
+        }
+
+        // محاكاة تحويل الكتابة اليدوية العربية إلى نص واضح (يمكن ربطها بنظام OCR مستقبلاً)
+        function simulateRecognition() {
+            if (!hasDrawn) {
+                alert("الرجاء الكتابة على السبورة أولاً!");
+                return;
+            }
+            // نص تجريبي جاهز باللغة العربية الواضحة لمدخلات الملاحظات
+            const sampleTexts = [
+                "السلام عليكم ورحمة الله وبركاته، هذا نص مكتوب بخط عربي واضح.",
+                "ملاحظات مهمة لهذا اليوم: تطوير تطبيق السبورة العائمة.",
+                "اللغة العربية هي لغة القرآن الكريم والجمال والفصاحة.",
+                "تم تحويل الكتابة اليدوية بنجاح إلى هذا الخط الواضح."
+            ];
+            const randomText = sampleTexts[Math.floor(Math.random() * sampleTexts.length)];
+            previewText.textContent = randomText;
+        }
+
+        // نسخ النص تلقائياً لإلصاقه في تطبيق الملاحظات
+        function copyToNotes() {
+            const textToCopy = previewText.textContent;
+            if (textToCopy.includes("اكتب بخط اليد")) {
+                alert("الرجاء تحويل الخط أولاً!");
+                return;
+            }
+            navigator.clipboard.writeText(textToCopy).then(() => {
+                showNotification();
+            }).catch(err => {
+                console.error('فشل النسخ:', err);
+            });
+        }
+
+        function showNotification() {
+            notification.classList.add('show');
+            setTimeout(() => {
+                notification.classList.remove('show');
+            }, 2500);
+        }
+    </script>
+</body>
+</html>
